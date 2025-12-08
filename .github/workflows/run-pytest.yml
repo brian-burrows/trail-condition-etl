@@ -4,12 +4,18 @@ on:
   pull_request:
     types:
       - ready_for_review
+
 jobs:
   test:
     runs-on: ubuntu-latest
     strategy:
       matrix:
+        # 1. Define the service directories
+        service-dir:
+          - categorize-trail-conditions
+          - fetch-weather
         python-version: ["3.13"]
+
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -22,10 +28,12 @@ jobs:
       - name: Install UV
         run: curl -LsSf https://astral.sh/uv/install.sh | sh
 
-      - name: Sync Environment with UV
-        working-directory: .
-        run: uv sync
+      - name: Sync Dependencies in ${{ matrix.service-dir }}
+        working-directory: ${{ matrix.service-dir }}
+        run: |
+          # The service directory must contain a pyproject.toml for uv sync to work
+          uv sync
 
-      - name: Run Tests with UV
-        working-directory: .
+      - name: Run Tests in ${{ matrix.service-dir }}
+        working-directory: ${{ matrix.service-dir }}
         run: uv run pytest

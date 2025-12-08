@@ -1,0 +1,13 @@
+[project]
+name = "fetch-weather"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = [
+    "etl",
+    "requests>=2.32.5",
+]
+
+[tool.uv.sources]
+etl = { git = "https://github.com/brian-burrows/outpost-etl-core.git", rev = "v.0.0.2" }
