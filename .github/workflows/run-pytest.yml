@@ -14,6 +14,7 @@ jobs:
         service-dir:
           - categorize-trail-conditions
           - fetch-weather
+          - schedule-jobs
         python-version: ["3.13"]
 
     steps:
