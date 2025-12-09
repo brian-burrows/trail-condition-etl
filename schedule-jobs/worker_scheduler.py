@@ -1,7 +1,7 @@
 import logging
 import sys
 import time
-from src.tasks import PRODUCER_MANAGER, get_location_data
+from scheduler.tasks import PRODUCER_MANAGER, get_location_data
 logging.basicConfig(encoding='utf-8', level=logging.DEBUG)
 LOGGER = logging.getLogger(__name__)
 

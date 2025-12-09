@@ -15,15 +15,13 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 RUN pip install --upgrade pip setuptools wheel uv
 
 # Copy lockfile and pyproject.toml
-COPY ./uv.lock /app/
-COPY ./pyproject.toml /app/
+COPY /uv.lock /app/
+COPY /pyproject.toml /app/
 RUN uv sync --locked --no-dev
 
-
 # Copy project source
-COPY ./worker.py /app
+COPY ./worker_ingestion.py /app
 COPY ./src /app/src
-RUN uv pip install -e .
 
 # Non-root user
 RUN groupadd --system --gid 999 nonroot \
@@ -36,4 +34,4 @@ EXPOSE 8000
 
 ENV PATH="/app/.venv/bin:$PATH"
 
-CMD ["python", "/app/worker.py"]
+CMD ["python", "/app/worker_ingestion.py"]
