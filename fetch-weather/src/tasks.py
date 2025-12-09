@@ -193,7 +193,7 @@ def process_ingestion_task(queued_task: QueuedTask):
     # This task needs to be split into more pipeline components for
     # decoupling in a future PR. It has too many responsibilities
     # and it complicates retry/circuit breaking mechanisms
-    task: OwmIngestionTask = queued_task.task
+    task: OwmIngestionTask = queued_task.payload
     key = OWM_DAILY_RATE_LIMITER._get_key_for_today()
     count = OWM_DAILY_RATE_LIMITER.client.get(key)
     LOGGER.info(f"The current rate limit count is {count}")
@@ -233,7 +233,7 @@ def make_upstream_consumer_and_dlq() -> TaskWorker:
         dequeue_batch_size=100,
         min_idle_time_seconds=10 * 60,
     )
-    task_consumer = SimpleTaskTransformer(executable = process_ingestion_task)
+    task_transformer = SimpleTaskTransformer(executable = process_ingestion_task)
     # Need to create a DLQ to send failed messages to
     dlq = RedisTaskQueueClient(
         client=REDIS_MASTER_CLIENT,
@@ -243,7 +243,7 @@ def make_upstream_consumer_and_dlq() -> TaskWorker:
     # Need to instatiate the Manager instance
     return ResilientTaskWorker(
         task_queue = task_queue,
-        task_consumer = task_consumer,
+        task_transformer = task_transformer,
         stuck_task_definition_seconds=60 * 10,
         expired_task_definition_seconds=60 * 60 * 24,
         max_delivery_count=6,

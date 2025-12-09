@@ -39,7 +39,7 @@ def _handle_task_failure(queued_task: QueuedTask, e: Exception, safe_to_retry: b
     """
     Centralized function to create a failed TaskTransformationResult.
     """
-    task = queued_task.task
+    task = queued_task.payload
     LOGGER.error(f"Task processing failed for task {task.task_id}. Error: {e}")
     return TaskTransformationResult(
         queued_task=queued_task, 
@@ -59,7 +59,7 @@ def process_task(queued_task: QueuedTask) -> TaskTransformationResult:
     If any step fails then the entire task fails. We raise errors to signal that failed tasks
     should be sent to the DLQ.
     """
-    task = queued_task.task
+    task = queued_task.payload
     if DEDUPLICATION_CACHE.is_task_id_in_cache(task.task_id):
         raise DuplicateTaskError(f"Task ID {task.task_id} has already been processed")
     LOGGER.info(f"Starting classification for Task ID: {task.task_id}, City ID: {task.city_id}")
@@ -111,10 +111,10 @@ def make_upstream_worker_and_dlq():
         dequeue_batch_size= 100,
         min_idle_time_seconds = 120,
     )
-    cat_task_consumer = SimpleTaskTransformer(executable=process_task)
+    task_transformer = SimpleTaskTransformer(executable=process_task)
     return ResilientTaskWorker(
         task_queue=task_queue,
-        task_consumer=cat_task_consumer,
+        task_transformer=task_transformer,
         stuck_task_definition_seconds=10 * 60,
         expired_task_definition_seconds=60 * 60 * 24,
         max_delivery_count=6,

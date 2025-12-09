@@ -19,11 +19,9 @@ COPY ./uv.lock /app/
 COPY ./pyproject.toml /app/
 RUN uv sync --locked --no-dev
 
-
 # Copy project source
-COPY ./worker.py /app
-COPY ./src /app/src
-RUN uv pip install -e .
+COPY ./worker_scheduler.py /app
+COPY ./scheduler /app/scheduler
 
 # Non-root user
 RUN groupadd --system --gid 999 nonroot \
@@ -36,4 +34,4 @@ EXPOSE 8000
 
 ENV PATH="/app/.venv/bin:$PATH"
 
-CMD ["python", "/app/worker.py"]
+CMD ["python", "/app/worker_scheduler.py"]
