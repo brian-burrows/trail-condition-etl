@@ -11,7 +11,7 @@ import requests
 from etl.models.tasks import QueuedTask
 from redis import StrictRedis
 
-from src.client import OpenWeatherMapAccessObject
+from src.api import OpenWeatherMapAccessObject
 from src.tasks import OwmIngestionTask
 
 

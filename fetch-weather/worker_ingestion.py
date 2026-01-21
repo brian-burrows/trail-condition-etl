@@ -29,10 +29,10 @@ from redis.exceptions import ConnectionError as RedisConnectionError
 from redis.retry import Retry
 from tenacity import retry, stop_a, stop_after_attempt, wait_exponential_jitter
 
-from src.client import  new_weather_api_client
+from src.api import  new_weather_api_client
 from src.config import ConsumerConfig, ProducerConfig
 from src.tasks import (
-    new_consumer,
+    new_worker,
     new_producer,
 )
 from src.weather import WeatherService, WeatherServiceInterface
@@ -144,14 +144,17 @@ def main(catcher):
         max_requests=cfg.OWM_MAX_DAILY_REQUESTS,
     )
     weather_service = new_weather_api_client()
-    consumer = new_consumer(
+    consumer = new_worker(
         redis_client=redis_client,
         rate_limiter=rate_limiter,
         weather_api_client=weather_api_client,
         weather_service=weather_service,
         config=cfg,
     )
-    producer = new_producer()
+    producer = new_producer(
+        redis_client=redis_client,
+        config=ProducerConfig()
+    )
     threads = [
         threading.Thread(
             group = None, 

@@ -1,14 +1,14 @@
 from unittest.mock import MagicMock
 
-from src.tasks import new_consumer, new_producer, process_ingestion_task, WeatherProcessor
+from src.tasks import new_worker, new_producer, WeatherProcessor
 from src.config import ConsumerConfig, ProducerConfig
-from src.client import new_weather_api_client
+from src.api import new_weather_api_client
 from src.weather import WeatherService
 
 
 
 def test_new_consumer(strict_redis_client, mock_rate_limiter, test_env_config):
-    new_consumer(
+    new_worker(
         redis_client=strict_redis_client, 
         rate_limiter=mock_rate_limiter,
         weather_api_client=new_weather_api_client,
@@ -18,8 +18,7 @@ def test_new_consumer(strict_redis_client, mock_rate_limiter, test_env_config):
     assert True 
 
 def test_new_producer(strict_redis_client, test_env_config):
-    new_producer(redis_client=strict_redis_client)
-    new_producer(redis_client=None, config=ProducerConfig())
+    new_producer(redis_client=strict_redis_client, config=ProducerConfig())
     assert True 
 
 

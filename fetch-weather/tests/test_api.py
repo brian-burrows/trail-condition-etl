@@ -19,7 +19,7 @@ def test_fetch_daily_historical_success(
 ):
     """Tests successful fetching and mapping of daily historical data."""
     monkeypatch.setattr(
-        "src.client.requests.get", 
+        "src.api.requests.get", 
         mock_open_weather_map_daily_historical_weather
     )
     target_date = current_date_utc
@@ -41,7 +41,7 @@ def test_fetch_hourly_forecast_success_and_duration_filter(
     mock_open_weather_map_hourly_forecast
 ):
     """Tests successful fetching, correct mapping, and filtering by duration (e.g., 2 hours)."""
-    monkeypatch.setattr("src.client.requests.get", mock_open_weather_map_hourly_forecast)
+    monkeypatch.setattr("src.api.requests.get", mock_open_weather_map_hourly_forecast)
     start_date = current_utc_hour
     duration = timedelta(hours=2)
     result = owm_client.fetch_hourly_weather_forecast(start_date, duration, TEST_LAT, TEST_LON)
@@ -59,7 +59,7 @@ def test_fetch_hourly_forecast_with_naive_datetime(
     current_utc_hour_no_tz
 ):
     """Hits the branch where start_datetime.tzinfo is None."""
-    monkeypatch.setattr("src.client.requests.get", mock_open_weather_map_hourly_forecast)
+    monkeypatch.setattr("src.api.requests.get", mock_open_weather_map_hourly_forecast)
     duration = timedelta(hours=2)
     with pytest.raises(ValueError, match="start_datetime must be timezone-aware"):
         owm_client.fetch_hourly_weather_forecast(
@@ -79,7 +79,7 @@ def test_daily_data_mapping_raises_on_missing_key(owm_client):
     mock_response = MagicMock(spec=requests.Response)
     mock_response.status_code = 200
     mock_response.json.return_value = malformed_data
-    with patch('src.client.requests.get', return_value=mock_response):
+    with patch('src.api.requests.get', return_value=mock_response):
         result = owm_client.fetch_daily_historical_weather_data(date.today(), TEST_LAT, TEST_LON)
         assert result.wind_speed_mps == 0.0
 
@@ -93,7 +93,7 @@ def test_hourly_data_mapping_raises_on_malformed_item(current_utc_hour, owm_clie
     mock_response = MagicMock(spec=requests.Response)
     mock_response.status_code = 200
     mock_response.json.return_value = malformed_forecast
-    with patch('src.client.requests.get', return_value=mock_response):
+    with patch('src.api.requests.get', return_value=mock_response):
         with pytest.raises(
             ValueError, 
             match="Failed to parse OWM hourly forecast data structure:"
@@ -115,7 +115,7 @@ def test_map_daily_data_type_error(owm_client):
         owm_client._map_daily_data(malformed_json, date.today())
 
 def test_execute_request_connection_error(owm_client):
-    with patch("src.client.requests.get") as mock_get:
+    with patch("src.api.requests.get") as mock_get:
         # Simulate a network timeout/drop
         mock_get.side_effect = requests.exceptions.ConnectionError("Network is down")
         
