@@ -2,17 +2,40 @@ import logging
 import sys
 import threading
 import time
+from datetime import datetime, timedelta, timezone
+from functools import partial
 
-from etl.dequeue import TaskWorker
+import redis
+from etl.brokers.redis import RedisTaskQueueClient
+from etl.dequeue import ResilientTaskWorker, TaskWorker
 from etl.enqueue import OutboxProducer
+from etl.exceptions import RateLimitExceededError
 from etl.handlers import SignalCatcher
-from etl.models.tasks import TaskTransformationResult
-
-from src.breakers import DOWNSTREAM_BROKER_CIRCUIT_BREAKER
-from src.tasks import (
-    new_producer,
-    new_consumer,
+from etl.models.tasks import (
+    BaseTask,
+    DeadLetterTaskPayload,
+    QueuedTask,
+    TaskTransformationResult,
 )
+from etl.storage.sqlite import SqliteTaskOutboxDAO
+from etl.throttling import RateLimiter
+from etl.throttling.redis import RedisDailyRateLimiter
+from etl.transformers import SimpleTaskTransformer
+from pybreaker import CircuitBreaker
+from redis import StrictRedis
+from redis.backoff import ExponentialWithJitterBackoff
+from redis.exceptions import BusyLoadingError
+from redis.exceptions import ConnectionError as RedisConnectionError
+from redis.retry import Retry
+from tenacity import retry, stop_a, stop_after_attempt, wait_exponential_jitter
+
+from src.client import  new_weather_api_client
+from src.config import ConsumerConfig, ProducerConfig
+from src.tasks import (
+    new_consumer,
+    new_producer,
+)
+from src.weather import WeatherService, WeatherServiceInterface
 
 logging.basicConfig(
     encoding='utf-8', 
@@ -23,6 +46,7 @@ LOGGER = logging.getLogger(__name__)
 REDIS_SUBMIT_FREQUENCY_SECONDS = 30
 CATEGORIZATION_BATCH_SIZE = 10
 PEL_CHECK_FREQUENCY_SECONDS = 60
+DOWNSTREAM_BROKER_CIRCUIT_BREAKER = CircuitBreaker(fail_max=10, reset_timeout = 60 * 10)
 
 # For the producer, we need a background process to send tasks from the persistent storage to Redis
 # Because we don't want to block the main thread that reads upstream tasks
@@ -100,7 +124,33 @@ def check_pending_entries_list(
         LOGGER.info("Thread exiting.")
 
 def main(catcher):
-    consumer = new_consumer()
+    cfg = ConsumerConfig()
+    redis_client = redis.StrictRedis(
+        connection_pool=redis.BlockingConnectionPool(
+            host=cfg.REDIS_HOST,
+            port=cfg.REDIS_PORT,
+            retry=Retry(ExponentialWithJitterBackoff(), 8),
+            retry_on_error=[BusyLoadingError, RedisConnectionError],
+            health_check_interval=3,
+            socket_connect_timeout=15,
+            socket_timeout=cfg.HTTP_TIMEOUT_SEC,
+            max_connections=cfg.REDIS_MAX_CONNECTIONS
+        )
+    )
+    weather_api_client = new_weather_api_client()
+    rate_limiter = RedisDailyRateLimiter(
+        client=redis_client,
+        base_key=cfg.RATE_LIMITER_KEY,
+        max_requests=cfg.OWM_MAX_DAILY_REQUESTS,
+    )
+    weather_service = new_weather_api_client()
+    consumer = new_consumer(
+        redis_client=redis_client,
+        rate_limiter=rate_limiter,
+        weather_api_client=weather_api_client,
+        weather_service=weather_service,
+        config=cfg,
+    )
     producer = new_producer()
     threads = [
         threading.Thread(
