@@ -1,15 +1,22 @@
-from datetime import date, datetime, timedelta
-from typing import Any, Dict, List
-from unittest.mock import MagicMock, patch
+import time
+from datetime import datetime, timezone
+from typing import Any
+from unittest.mock import MagicMock
 from urllib.parse import parse_qs, urlparse
-from src.client import OpenWeatherMapAccessObject
+from uuid import uuid4
 
-
+import docker
 import pytest
 import requests
+from etl.models.tasks import QueuedTask
+from redis import StrictRedis
+
+from src.api import OpenWeatherMapAccessObject
+from src.tasks import OwmIngestionTask
+
 
 @pytest.fixture
-def _mock_open_weather_map_daily_historical_weather() -> dict[str, Any]:
+def mock_open_weather_map_daily_historical_weather() -> dict[str, Any]:
     """
     Mocks the response for the OWM 3.0 day_summary endpoint.
     
@@ -57,7 +64,7 @@ def _mock_open_weather_map_daily_historical_weather() -> dict[str, Any]:
     return f
 
 @pytest.fixture
-def _mock_open_weather_map_hourly_forecast() -> dict[str, Any]:
+def mock_open_weather_map_hourly_forecast() -> dict[str, Any]:
     """
     Mocks the response for the OWM 3.0 onecall endpoint, specifically for hourly forecast.
     It generates a sequence of 4 hourly records using local sequence generation.
@@ -114,3 +121,125 @@ def _mock_open_weather_map_hourly_forecast() -> dict[str, Any]:
         mock_response.json.return_value = response_data
         return mock_response
     return f
+
+
+@pytest.fixture
+def owm_client():
+    """Fixture to instantiate the client with mocked resilience objects."""
+    return OpenWeatherMapAccessObject()
+
+@pytest.fixture
+def current_utc_hour():
+    return (
+        datetime
+        .now()
+        .astimezone(timezone.utc)
+        .replace(minute=0, second=0, microsecond=0)
+    )
+
+@pytest.fixture
+def current_utc_hour_no_tz():
+    return (
+        datetime
+        .now()
+        .replace(minute=0, second=0, microsecond=0)
+    )
+
+@pytest.fixture 
+def current_date_utc(current_utc_hour):
+    return current_utc_hour.date()
+
+
+@pytest.fixture(scope="session")
+def redis_service():
+    """Returns the host and port for the running Redis container."""
+    return {
+        "host": "localhost",
+        "port": 6381
+    }
+
+
+@pytest.fixture
+def test_env_config(monkeypatch, redis_service):
+    """
+    Overwrites environment variables so that any Config instantiated 
+    within the test uses the Docker Redis port.
+    """
+    # Override host and port to match the docker container
+    monkeypatch.setenv("REDIS_MASTER_HOST", redis_service["host"])
+    monkeypatch.setenv("REDIS_MASTER_PORT", str(redis_service["port"]))
+    # Use a safe temp path for SQLite during tests
+    monkeypatch.setenv("CATEGORIZATION_SQLITE_DB", ":memory:")
+    
+    # Lower timeouts for faster tests
+    monkeypatch.setenv("HTTP_TIMEOUT_SEC", "1")
+
+@pytest.fixture(scope="session")
+def redis_container(redis_service):
+    client = docker.from_env()
+    
+    # Mapping your YAML config to Python SDK
+    container = client.containers.run(
+        image="redis:7.0-alpine",
+        command="redis-server --appendonly yes",
+        name="test-redis-instance",
+        detach=True,
+        ports={'6379/tcp': redis_service["port"]},
+        restart_policy={"Name": "always"},
+        volumes={'redis_data': {'bind': '/data', 'mode': 'rw'}},
+        healthcheck={
+            "Test": ["CMD", "redis-cli", "ping"],
+            "Interval": 10_000_000_000, # 10s in nanoseconds
+            "Timeout": 5_000_000_000,   # 5s
+            "Retries": 3
+        }
+    )
+    timeout = 15
+    stop_time = time.time() + timeout
+    while time.time() < stop_time:
+        container.reload()
+        if container.attrs['State']['Health']['Status'] == 'healthy':
+            break
+        time.sleep(0.01)
+    else:
+        container.stop()
+        container.remove()
+        raise RuntimeError("Redis container failed to become healthy")
+
+    yield container
+    container.stop()
+    container.remove()
+
+@pytest.fixture
+def strict_redis_client(redis_service, redis_container):
+    client = StrictRedis(
+        host=redis_service["host"], 
+        port=redis_service["port"], 
+        decode_responses=True
+    )
+    client.flushdb()
+    return client
+
+@pytest.fixture
+def mock_rate_limiter():
+    class RL():
+        def allow_request(self):
+            return True 
+        
+    return RL()
+
+@pytest.fixture
+def mock_queued_task():
+    payload = OwmIngestionTask(
+        task_id=uuid4(),
+        longitude_deg=0.0,
+        latitude_deg=0.0,
+        city_id=0
+    )
+    return QueuedTask(
+        queued_message_id="abc",
+        time_since_queued_seconds=1,
+        time_since_last_delivered_seconds=0,
+        number_of_times_delivered=0,
+        payload=payload
+    )

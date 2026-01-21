@@ -3,16 +3,25 @@ import sys
 import threading
 import time
 
+import redis
 from etl.dequeue import TaskWorker
 from etl.enqueue import OutboxProducer
 from etl.handlers import SignalCatcher
 from etl.models.tasks import TaskTransformationResult
+from etl.throttling.redis import RedisDailyRateLimiter
+from pybreaker import CircuitBreaker
+from redis.backoff import ExponentialWithJitterBackoff
+from redis.exceptions import BusyLoadingError
+from redis.exceptions import ConnectionError as RedisConnectionError
+from redis.retry import Retry
 
-from src.breakers import DOWNSTREAM_BROKER_CIRCUIT_BREAKER
+from src.api import MockWeatherApiAccessObject
+from src.config import ConsumerConfig, ProducerConfig
 from src.tasks import (
-    make_downstream_producer_and_persistent_storage,
-    make_upstream_consumer_and_dlq,
+    new_producer,
+    new_worker,
 )
+from src.weather import WeatherService
 
 logging.basicConfig(
     encoding='utf-8', 
@@ -23,6 +32,7 @@ LOGGER = logging.getLogger(__name__)
 REDIS_SUBMIT_FREQUENCY_SECONDS = 30
 CATEGORIZATION_BATCH_SIZE = 10
 PEL_CHECK_FREQUENCY_SECONDS = 60
+DOWNSTREAM_BROKER_CIRCUIT_BREAKER = CircuitBreaker(fail_max=10, reset_timeout = 60 * 10)
 
 # For the producer, we need a background process to send tasks from the persistent storage to Redis
 # Because we don't want to block the main thread that reads upstream tasks
@@ -100,8 +110,37 @@ def check_pending_entries_list(
         LOGGER.info("Thread exiting.")
 
 def main(catcher):
-    consumer = make_upstream_consumer_and_dlq()
-    producer = make_downstream_producer_and_persistent_storage()
+    cfg = ConsumerConfig()
+    redis_client = redis.StrictRedis(
+        connection_pool=redis.BlockingConnectionPool(
+            host=cfg.REDIS_HOST,
+            port=cfg.REDIS_PORT,
+            retry=Retry(ExponentialWithJitterBackoff(), 8),
+            retry_on_error=[BusyLoadingError, RedisConnectionError],
+            health_check_interval=3,
+            socket_connect_timeout=15,
+            socket_timeout=cfg.HTTP_TIMEOUT_SEC,
+            max_connections=cfg.REDIS_MAX_CONNECTIONS
+        )
+    )
+    weather_api_client = MockWeatherApiAccessObject()
+    rate_limiter = RedisDailyRateLimiter(
+        client=redis_client,
+        base_key=cfg.RATE_LIMITER_KEY,
+        max_requests=cfg.OWM_MAX_DAILY_REQUESTS,
+    )
+    weather_service = WeatherService(cfg)
+    consumer = new_worker(
+        redis_client=redis_client,
+        rate_limiter=rate_limiter,
+        weather_api_client=weather_api_client,
+        weather_service=weather_service,
+        config=cfg,
+    )
+    producer = new_producer(
+        redis_client=redis_client,
+        config=ProducerConfig()
+    )
     threads = [
         threading.Thread(
             group = None, 
@@ -134,6 +173,9 @@ def main(catcher):
             LOGGER.debug(f"Downstream tasks {downstream_tasks}")
             # TODO: we've already acknowledged the upstream task
             # so if this worker dies now, then we won't persist the message downstream
+            ## We'll have written the weather data to the database
+            ## But, we might not trigger a Classification task downstream
+            ## This is a small risk, as we'll trigger this again on a schedule.
             if downstream_tasks:
                 LOGGER.info(f"Processed batch: obtained {len(downstream_tasks)} tasks for downstream production.")
                 producer.produce_batch_to_disk(downstream_tasks)

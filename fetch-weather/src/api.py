@@ -5,8 +5,6 @@ from typing import Any, Literal
 import requests
 from pydantic import BaseModel, Field
 
-OWM_API_KEY = "TODO-TEST"
-
 class WeatherDatum(BaseModel):
     wind_speed_mps: float = Field(description = "Wind speed in meters per second")
     rain_fall_total_mm: float = Field(description = "Rain fall total in mm")
@@ -41,6 +39,7 @@ class WeatherApiInterface(ABC):
 
 
 class OpenWeatherMapAccessObject(WeatherApiInterface):
+    OWM_API_KEY = "TODO-TEST"
     BASE_URL = "https://api.openweathermap.org/data/3.0/onecall"
     historical_weather_api_url = (
         "{base_url}/day_summary?lat={lat}&lon={lon}&date={date}&units=metric&appid={api_key}"
@@ -60,18 +59,14 @@ class OpenWeatherMapAccessObject(WeatherApiInterface):
                 rain_fall_total_mm=data.get('precipitation', {}).get('total', 0.0),
                 temperature_deg_c=data["temperature"]["max"],
             )
-        except (KeyError, TypeError) as e:
+        except Exception as e:
             raise ValueError(f"Failed to parse OWM data structure: {e}")
         
     def _map_hourly_data(self, hour_data: dict[str, Any]) -> WeatherData:
         """Maps a single OWM JSON hourly item to the internal WeatherData model."""
         try:
-            dt_seconds = hour_data.get('dt')
-            temperature_deg_c = hour_data.get('temp')
-            if dt_seconds is None:
-                 raise ValueError("Hourly data missing required 'dt' field.")
-            if temperature_deg_c is None:
-                 raise ValueError("Hourly data missing required 'temp' field.")
+            dt_seconds = hour_data['dt']
+            temperature_deg_c = hour_data['temp']
             timestamp = datetime.fromtimestamp(dt_seconds, tz=timezone.utc)
             wind_speed_mps = hour_data.get('wind_speed', 0.0)
             rain_data = hour_data.get('rain')
@@ -102,7 +97,7 @@ class OpenWeatherMapAccessObject(WeatherApiInterface):
             lat=lat, 
             lon=lon, 
             date=target_date.strftime("%Y-%m-%d"), 
-            api_key=OWM_API_KEY
+            api_key=self.OWM_API_KEY
         )
         data = self._execute_request(url)
         return self._map_daily_data(data, target_date)
@@ -118,27 +113,23 @@ class OpenWeatherMapAccessObject(WeatherApiInterface):
         Fetches the hourly weather forecast for the duration starting from start_date.
         OWM One Call 3.0 provides up to 48 hours of hourly forecast.
         """
+        if start_datetime.tzinfo is None:
+            raise ValueError("start_datetime must be timezone-aware")
         exclude_parts = "current,minutely,daily,alerts"
         url = self.forecast_weather_api_url.format(
             base_url = self.BASE_URL,
             lat=lat, 
             lon=lon, 
             part=exclude_parts, 
-            api_key=OWM_API_KEY
+            api_key=self.OWM_API_KEY
         )
         data = self._execute_request(url)
         forecast_data: list[WeatherData] = []
-        if start_datetime.tzinfo is None:
-            start_datetime = (
-                start_datetime
-                .replace(tzinfo=timezone.utc, minute=0, second=0, microsecond=0)
-            )
-        else:
-            start_datetime = (
-                start_datetime
-                .astimezone(timezone.utc)
-                .replace(minute=0, second=0, microsecond=0)
-            )
+        start_datetime = (
+            start_datetime
+            .astimezone(timezone.utc)
+            .replace(minute=0, second=0, microsecond=0)
+        )
         end_datetime = start_datetime + duration
         if 'hourly' in data:
             for hour_data in data['hourly']:
@@ -149,3 +140,41 @@ class OpenWeatherMapAccessObject(WeatherApiInterface):
                     forecast_data.append(self._map_hourly_data(hour_data))  
         return forecast_data
     
+
+class MockWeatherApiAccessObject(WeatherApiInterface):
+    def fetch_daily_historical_weather_data(
+        self, 
+        target_date: date,
+        lat: float, 
+        lon: float,
+    ) -> WeatherData:
+        return WeatherData(
+            timestamp=datetime.combine(target_date, datetime.min.time(), tzinfo=timezone.utc),
+            aggregation_level="daily",
+            wind_speed_mps=4.5,
+            rain_fall_total_mm=0.0,
+            temperature_deg_c=22.5
+        )
+
+    def fetch_hourly_weather_forecast(
+        self, 
+        start_date: datetime, 
+        duration: timedelta, 
+        lat: float, 
+        lon: float
+    ) -> list[WeatherData]:
+        # Generate a list of WeatherData based on the requested duration
+        hours = int(duration.total_seconds() // 3600)
+        return [
+            WeatherData(
+                timestamp=start_date + timedelta(hours=i),
+                aggregation_level="hourly",
+                wind_speed_mps=3.0,
+                rain_fall_total_mm=0.1,
+                temperature_deg_c=18.0 + (i * 0.1) # Simulate slight temp change
+            )
+            for i in range(hours)
+        ]
+
+def new_weather_api_client():
+    return MockWeatherApiAccessObject()
