@@ -56,9 +56,6 @@ def process_ingestion_task(
     # decoupling in a future PR. It has too many responsibilities
     # and it complicates retry/circuit breaking mechanisms
     task: OwmIngestionTask = queued_task.payload
-    key = rate_limiter._get_key_for_today()
-    count = rate_limiter.client.get(key)
-    LOGGER.info(f"The current rate limit count is {count}")
     if not rate_limiter.allow_request():
         raise RateLimitExceededError("Daily rate limit exceeded for Open Weather Maps")
     current_hour = datetime.now().astimezone(timezone.utc).replace(minute=0,second=0, microsecond=0)

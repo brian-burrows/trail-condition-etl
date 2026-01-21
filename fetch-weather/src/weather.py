@@ -9,11 +9,11 @@ LOGGER = logging.getLogger(__name__)
 
 class WeatherServiceInterface(ABC):
     @abstractmethod
-    def post_historical_data():
+    def post_historical_data(self, data: dict) -> bool:
         pass
 
     @abstractmethod
-    def post_forecast_data():
+    def post_forecast_data(self, data: list[dict]) -> bool:
         pass
 
 

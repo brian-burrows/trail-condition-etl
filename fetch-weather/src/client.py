@@ -60,18 +60,14 @@ class OpenWeatherMapAccessObject(WeatherApiInterface):
                 rain_fall_total_mm=data.get('precipitation', {}).get('total', 0.0),
                 temperature_deg_c=data["temperature"]["max"],
             )
-        except (KeyError, TypeError) as e:
+        except Exception as e:
             raise ValueError(f"Failed to parse OWM data structure: {e}")
         
     def _map_hourly_data(self, hour_data: dict[str, Any]) -> WeatherData:
         """Maps a single OWM JSON hourly item to the internal WeatherData model."""
         try:
-            dt_seconds = hour_data.get('dt')
-            temperature_deg_c = hour_data.get('temp')
-            if dt_seconds is None:
-                 raise ValueError("Hourly data missing required 'dt' field.")
-            if temperature_deg_c is None:
-                 raise ValueError("Hourly data missing required 'temp' field.")
+            dt_seconds = hour_data['dt']
+            temperature_deg_c = hour_data['temp']
             timestamp = datetime.fromtimestamp(dt_seconds, tz=timezone.utc)
             wind_speed_mps = hour_data.get('wind_speed', 0.0)
             rain_data = hour_data.get('rain')
@@ -118,6 +114,8 @@ class OpenWeatherMapAccessObject(WeatherApiInterface):
         Fetches the hourly weather forecast for the duration starting from start_date.
         OWM One Call 3.0 provides up to 48 hours of hourly forecast.
         """
+        if start_datetime.tzinfo is None:
+            raise ValueError("start_datetime must be timezone-aware")
         exclude_parts = "current,minutely,daily,alerts"
         url = self.forecast_weather_api_url.format(
             base_url = self.BASE_URL,
@@ -128,17 +126,11 @@ class OpenWeatherMapAccessObject(WeatherApiInterface):
         )
         data = self._execute_request(url)
         forecast_data: list[WeatherData] = []
-        if start_datetime.tzinfo is None:
-            start_datetime = (
-                start_datetime
-                .replace(tzinfo=timezone.utc, minute=0, second=0, microsecond=0)
-            )
-        else:
-            start_datetime = (
-                start_datetime
-                .astimezone(timezone.utc)
-                .replace(minute=0, second=0, microsecond=0)
-            )
+        start_datetime = (
+            start_datetime
+            .astimezone(timezone.utc)
+            .replace(minute=0, second=0, microsecond=0)
+        )
         end_datetime = start_datetime + duration
         if 'hourly' in data:
             for hour_data in data['hourly']:
