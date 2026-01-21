@@ -219,6 +219,7 @@ def strict_redis_client(redis_service, redis_container):
     )
     client.flushdb()
     return client
+
 @pytest.fixture
 def mock_rate_limiter():
     class RL():
