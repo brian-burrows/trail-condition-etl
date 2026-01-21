@@ -1,12 +1,17 @@
-from datetime import date, datetime, timedelta
+import time
+from datetime import date, datetime, timedelta, timezone
 from typing import Any, Dict, List
 from unittest.mock import MagicMock, patch
 from urllib.parse import parse_qs, urlparse
-from src.client import OpenWeatherMapAccessObject
 
-
+import docker
 import pytest
 import requests
+from pytest_redis import factories
+from redis import StrictRedis
+
+from src.client import OpenWeatherMapAccessObject
+
 
 @pytest.fixture
 def _mock_open_weather_map_daily_historical_weather() -> dict[str, Any]:
@@ -114,3 +119,73 @@ def _mock_open_weather_map_hourly_forecast() -> dict[str, Any]:
         mock_response.json.return_value = response_data
         return mock_response
     return f
+
+
+@pytest.fixture
+def owm_client():
+    """Fixture to instantiate the client with mocked resilience objects."""
+    return OpenWeatherMapAccessObject()
+
+@pytest.fixture
+def current_utc_hour():
+    return (
+        datetime
+        .now()
+        .astimezone(timezone.utc)
+        .replace(minute=0, second=0, microsecond=0)
+    )
+
+@pytest.fixture 
+def current_date_utc(current_utc_hour):
+    return current_utc_hour.date()
+
+@pytest.fixture(scope="session")
+def redis_container():
+    client = docker.from_env()
+    
+    # Mapping your YAML config to Python SDK
+    container = client.containers.run(
+        image="redis:7.0-alpine",
+        command="redis-server --appendonly yes",
+        name="pytest-redis-service-2",
+        detach=True,
+        ports={'6379/tcp': 6381},
+        restart_policy={"Name": "always"},
+        volumes={'redis_data': {'bind': '/data', 'mode': 'rw'}},
+        healthcheck={
+            "Test": ["CMD", "redis-cli", "ping"],
+            "Interval": 10_000_000_000, # 10s in nanoseconds
+            "Timeout": 5_000_000_000,   # 5s
+            "Retries": 3
+        }
+    )
+    timeout = 15
+    stop_time = time.time() + timeout
+    while time.time() < stop_time:
+        container.reload()
+        if container.attrs['State']['Health']['Status'] == 'healthy':
+            break
+        time.sleep(0.01)
+    else:
+        container.stop()
+        container.remove()
+        raise RuntimeError("Redis container failed to become healthy")
+
+    yield container
+    container.stop()
+    container.remove()
+
+@pytest.fixture
+def strict_redis_client(redis_container):
+    """Provides a client connected to the programmatic container."""
+    client = StrictRedis(host="localhost", port=6381, decode_responses=True)
+    client.flushdb()
+    return client
+
+@pytest.fixture
+def mock_rate_limiter():
+    class RL():
+        def allow_request(self):
+            return True 
+        
+    return RL()

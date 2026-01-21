@@ -149,3 +149,5 @@ class OpenWeatherMapAccessObject(WeatherApiInterface):
                     forecast_data.append(self._map_hourly_data(hour_data))  
         return forecast_data
     
+def new_weather_api_client():
+    return OpenWeatherMapAccessObject()

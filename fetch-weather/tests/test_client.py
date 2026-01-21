@@ -1,32 +1,14 @@
-from datetime import date, datetime, timedelta, timezone
+from datetime import date, timedelta
 from unittest.mock import MagicMock, patch
 
 import pytest
 import requests
-from src.client import OpenWeatherMapAccessObject
 
 BASE_TEMP_K: float = 288.15 
 BASE_TEMP_C: float = 15.0
 TEST_LAT = 39.0
 TEST_LON = -105.0
 
-@pytest.fixture
-def owm_client():
-    """Fixture to instantiate the client with mocked resilience objects."""
-    return OpenWeatherMapAccessObject()
-
-@pytest.fixture
-def current_utc_hour():
-    return (
-        datetime
-        .now()
-        .astimezone(timezone.utc)
-        .replace(minute=0, second=0, microsecond=0)
-    )
-
-@pytest.fixture 
-def current_date_utc(current_utc_hour):
-    return current_utc_hour.date()
 
 def test_fetch_daily_historical_success(
     current_date_utc,
@@ -37,7 +19,6 @@ def test_fetch_daily_historical_success(
     """Tests successful fetching and mapping of daily historical data."""
     # Patch requests.get for the daily call
     monkeypatch.setattr("src.client.requests.get", _mock_open_weather_map_daily_historical_weather)
-    
     target_date = current_date_utc
     historical_data = owm_client.fetch_daily_historical_weather_data(
         target_date = target_date,

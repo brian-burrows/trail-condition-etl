@@ -10,8 +10,8 @@ from etl.models.tasks import TaskTransformationResult
 
 from src.breakers import DOWNSTREAM_BROKER_CIRCUIT_BREAKER
 from src.tasks import (
-    make_downstream_producer_and_persistent_storage,
-    make_upstream_consumer_and_dlq,
+    new_producer,
+    new_consumer,
 )
 
 logging.basicConfig(
@@ -100,8 +100,8 @@ def check_pending_entries_list(
         LOGGER.info("Thread exiting.")
 
 def main(catcher):
-    consumer = make_upstream_consumer_and_dlq()
-    producer = make_downstream_producer_and_persistent_storage()
+    consumer = new_consumer()
+    producer = new_producer()
     threads = [
         threading.Thread(
             group = None, 
