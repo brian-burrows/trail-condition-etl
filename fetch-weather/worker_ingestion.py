@@ -2,40 +2,26 @@ import logging
 import sys
 import threading
 import time
-from datetime import datetime, timedelta, timezone
-from functools import partial
 
 import redis
-from etl.brokers.redis import RedisTaskQueueClient
-from etl.dequeue import ResilientTaskWorker, TaskWorker
+from etl.dequeue import TaskWorker
 from etl.enqueue import OutboxProducer
-from etl.exceptions import RateLimitExceededError
 from etl.handlers import SignalCatcher
-from etl.models.tasks import (
-    BaseTask,
-    DeadLetterTaskPayload,
-    QueuedTask,
-    TaskTransformationResult,
-)
-from etl.storage.sqlite import SqliteTaskOutboxDAO
-from etl.throttling import RateLimiter
+from etl.models.tasks import TaskTransformationResult
 from etl.throttling.redis import RedisDailyRateLimiter
-from etl.transformers import SimpleTaskTransformer
 from pybreaker import CircuitBreaker
-from redis import StrictRedis
 from redis.backoff import ExponentialWithJitterBackoff
 from redis.exceptions import BusyLoadingError
 from redis.exceptions import ConnectionError as RedisConnectionError
 from redis.retry import Retry
-from tenacity import retry, stop_a, stop_after_attempt, wait_exponential_jitter
 
-from src.api import  new_weather_api_client
+from src.api import MockWeatherApiAccessObject
 from src.config import ConsumerConfig, ProducerConfig
 from src.tasks import (
-    new_worker,
     new_producer,
+    new_worker,
 )
-from src.weather import WeatherService, WeatherServiceInterface
+from src.weather import WeatherService
 
 logging.basicConfig(
     encoding='utf-8', 
@@ -137,13 +123,13 @@ def main(catcher):
             max_connections=cfg.REDIS_MAX_CONNECTIONS
         )
     )
-    weather_api_client = new_weather_api_client()
+    weather_api_client = MockWeatherApiAccessObject()
     rate_limiter = RedisDailyRateLimiter(
         client=redis_client,
         base_key=cfg.RATE_LIMITER_KEY,
         max_requests=cfg.OWM_MAX_DAILY_REQUESTS,
     )
-    weather_service = new_weather_api_client()
+    weather_service = WeatherService(cfg)
     consumer = new_worker(
         redis_client=redis_client,
         rate_limiter=rate_limiter,
@@ -187,6 +173,9 @@ def main(catcher):
             LOGGER.debug(f"Downstream tasks {downstream_tasks}")
             # TODO: we've already acknowledged the upstream task
             # so if this worker dies now, then we won't persist the message downstream
+            ## We'll have written the weather data to the database
+            ## But, we might not trigger a Classification task downstream
+            ## This is a small risk, as we'll trigger this again on a schedule.
             if downstream_tasks:
                 LOGGER.info(f"Processed batch: obtained {len(downstream_tasks)} tasks for downstream production.")
                 producer.produce_batch_to_disk(downstream_tasks)

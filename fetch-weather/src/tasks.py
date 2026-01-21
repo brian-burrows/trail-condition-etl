@@ -1,6 +1,5 @@
 import logging
 from datetime import datetime, timedelta, timezone
-from functools import partial
 
 import redis
 from etl.brokers.redis import RedisTaskQueueClient
@@ -18,19 +17,14 @@ from etl.throttling import RateLimiter
 from etl.throttling.redis import RedisDailyRateLimiter
 from etl.transformers import SimpleTaskTransformer
 from redis import StrictRedis
-from redis.backoff import ExponentialWithJitterBackoff
-from redis.exceptions import BusyLoadingError
-from redis.exceptions import ConnectionError as RedisConnectionError
-from redis.retry import Retry
-from tenacity import retry, stop_after_attempt, wait_exponential_jitter
 
+from src.api import WeatherApiInterface
 from src.breakers import (
     DLQ_CIRCUIT_BREAKER,
     UPSTREAM_BROKER_CIRCUIT_BREAKER,
 )
-from src.api import WeatherApiInterface, new_weather_api_client
 from src.config import ConsumerConfig, ProducerConfig
-from src.weather import WeatherService, WeatherServiceInterface
+from src.weather import WeatherServiceInterface
 
 LOGGER = logging.getLogger(__name__)
 

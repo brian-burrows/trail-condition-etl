@@ -1,4 +1,3 @@
-import datetime
 from datetime import date, timedelta
 from unittest.mock import MagicMock, patch
 
